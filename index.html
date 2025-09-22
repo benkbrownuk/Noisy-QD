@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Noisy Quadratic Dataset Visualization</title>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <style>
+        body { font-family: Arial, sans-serif; background: #fafbfc; margin: 0; }
+        .container { max-width: 1200px; margin: 30px auto; padding: 20px; background: #fff; border-radius: 10px; }
+        h2 { text-align: center; }
+        .button-row { text-align: center; margin-bottom: 20px; }
+        .plots-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 30px; }
+        .row { display: contents; }
+        .plot { background: #f5f5f5; border-radius: 8px; padding: 10px; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Points sampled from a quadratic curve with random noise.</h2>
+        <div class="button-row">
+            <button onclick="regenerateData()">Regenerate Data</button>
+        </div>
+        <div class="plots-grid" id="plots-grid">
+            <!-- Plots will be inserted here -->
+        </div>
+    </div>
+    <script>
+        function generateNoisyQuadraticData(n=100, a=0.5, b=0, c=2, noise=2.0) {
+            const x = Array.from({length: n}, (_, i) => -5 + 10 * i / (n-1));
+            const yTrue = x.map(xi => a*xi*xi + b*xi + c);
+            const yNoisy = yTrue.map(yi => yi + (Math.random() - 0.5) * noise * 2);
+            return { x, yTrue, yNoisy };
+        }
+
+        function piecewiseConstantFit(x, y, bins=5) {
+            // Bin x, average y in each bin
+            const minX = Math.min(...x), maxX = Math.max(...x);
+            const binWidth = (maxX - minX) / bins;
+            let binEdges = Array.from({length: bins+1}, (_, i) => minX + i*binWidth);
+            let binMeans = [];
+            for (let i = 0; i < bins; i++) {
+                let binYs = y.filter((_, j) => x[j] >= binEdges[i] && x[j] < binEdges[i+1]);
+                binMeans.push(binYs.length ? binYs.reduce((a,b)=>a+b,0)/binYs.length : 0);
+            }
+            // For plotting: step function
+            let stepX = [], stepY = [];
+            for (let i = 0; i < bins; i++) {
+                stepX.push(binEdges[i]);
+                stepY.push(binMeans[i]);
+                stepX.push(binEdges[i+1]);
+                stepY.push(binMeans[i]);
+            }
+            return { stepX, stepY };
+        }
+
+        function plotAll() {
+            const grid = document.getElementById('plots-grid');
+            grid.innerHTML = '';
+            const nRows = 3;
+            const nCols = 2;
+            for (let row = 0; row < nRows; row++) {
+                // Generate new data for each row
+                const {x, yTrue, yNoisy} = generateNoisyQuadraticData();
+                // Left: data + true + fit
+                const fit = piecewiseConstantFit(x, yNoisy, 5);
+                const leftDiv = document.createElement('div');
+                leftDiv.className = 'plot';
+                leftDiv.id = `plot-left-${row}`;
+                grid.appendChild(leftDiv);
+                Plotly.newPlot(leftDiv.id, [
+                    {x, y: yNoisy, mode: 'markers', name: 'Noisy Data', marker: {color: 'royalblue', size: 5}},
+                    {x, y: yTrue, mode: 'lines', name: 'True Quadratic', line: {color: 'seagreen', width: 2}},
+                    {x: fit.stepX, y: fit.stepY, mode: 'lines', name: 'Piecewise Fit', line: {color: 'purple', width: 2, dash: 'solid'}, connectgaps: true}
+                ], {
+                    margin: {t: 20, r: 10, l: 30, b: 30},
+                    showlegend: false,
+                    height: 250,
+                    yaxis: {range: [-2.5, 14]},
+                    xaxis: {range: [-5, 5]}
+                }, {displayModeBar: false});
+                // Right: residuals
+                const residuals = yNoisy.map((y, i) => y - fit.stepY[Math.floor(5*(x[i]+5)/10)]);
+                const rightDiv = document.createElement('div');
+                rightDiv.className = 'plot';
+                rightDiv.id = `plot-right-${row}`;
+                grid.appendChild(rightDiv);
+                Plotly.newPlot(rightDiv.id, [
+                    {x, y: residuals, mode: 'markers', name: 'Residuals', marker: {color: 'crimson', size: 5}},
+                    {x: fit.stepX, y: Array(fit.stepX.length).fill(0), mode: 'lines', line: {color: 'gray', width: 1, dash: 'dot'}, showlegend: false},
+                    {x: fit.stepX, y: fit.stepY.map(_=>0), mode: 'lines', line: {color: 'purple', width: 2}, showlegend: false}
+                ], {
+                    margin: {t: 20, r: 10, l: 30, b: 30},
+                    showlegend: false,
+                    height: 180,
+                    yaxis: {range: [-6, 4]},
+                    xaxis: {range: [-5, 5]}
+                }, {displayModeBar: false});
+            }
+        }
+
+        function regenerateData() {
+            plotAll();
+        }
+
+        // Initial plot
+        window.onload = plotAll;
+    </script>
+</body>
+</html>
