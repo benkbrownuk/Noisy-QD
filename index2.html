@@ -2,115 +2,95 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
-  <title>Noisy Quadratic Dataset Visualization</title>
-  <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
-  <style>
-    body { font-family: Arial, sans-serif; background: #fafbfc; margin: 0; }
-    .container { max-width: 1200px; margin: 30px auto; padding: 20px; background: #fff; border-radius: 10px; }
-    h2 { text-align: center; }
-    .button-row { text-align: center; margin-bottom: 20px; }
-    .plots-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 30px; }
-    .plot { background: #f5f5f5; border-radius: 8px; padding: 10px; }
-  </style>
+  <title>Residual Trees</title>
+  <script src="https://cdn.jsdelivr.net/npm/d3@7"></script>
+  <script type="module">
+    import * as d3 from "https://cdn.jsdelivr.net/npm/d3@7/+esm";
+    import { DecisionTreeRegressor } from "https://cdn.jsdelivr.net/npm/scikitjs@latest/dist/scikit.esm.js";
+
+    async function run() {
+      // Generate data
+      const X = d3.range(-5, 5, 0.1).map(d => [d]);
+      const y_true = X.map(d => Math.sin(d[0]) + 0.5 * d3.randomNormal(0, 1)());
+
+      // First tree on noisy data
+      let tree1 = new DecisionTreeRegressor({ maxDepth: 4 });
+      await tree1.fit(X, y_true);
+      let pred1 = await tree1.predict(X);
+
+      // First residuals
+      let residual1 = y_true.map((d, i) => d - pred1[i]);
+
+      // Tree on residuals
+      let tree2 = new DecisionTreeRegressor({ maxDepth: 4 });
+      await tree2.fit(X, residual1);
+      let pred_resid1 = await tree2.predict(X);
+
+      // Corrected prediction after 2 stages
+      let corrected2 = pred1.map((d, i) => d + pred_resid1[i]);
+
+      // Second residuals
+      let residual2 = y_true.map((d, i) => d - corrected2[i]);
+
+      // Third tree on residuals
+      let tree3 = new DecisionTreeRegressor({ maxDepth: 4 });
+      await tree3.fit(X, residual2);
+      let pred_resid2 = await tree3.predict(X);
+
+      // Corrected prediction after 3 stages
+      let corrected3 = corrected2.map((d, i) => d + pred_resid2[i]);
+
+      // Plotting
+      const width = 700, height = 400;
+      const svg = d3.select("body").append("svg")
+          .attr("width", width).attr("height", height);
+
+      const xScale = d3.scaleLinear().domain([-5, 5]).range([50, width - 20]);
+      const yScale = d3.scaleLinear().domain([-6, 6]).range([height - 40, 20]);
+
+      // Axes
+      svg.append("g")
+         .attr("transform", `translate(0,${yScale(0)})`)
+         .call(d3.axisBottom(xScale));
+      svg.append("g")
+         .attr("transform", `translate(${xScale(0)},0)`)
+         .call(d3.axisLeft(yScale));
+
+      // Data points (red)
+      svg.selectAll("circle")
+         .data(X.map((d, i) => ({x: d[0], y: y_true[i]})))
+         .enter().append("circle")
+         .attr("cx", d => xScale(d.x))
+         .attr("cy", d => yScale(d.y))
+         .attr("r", 2)
+         .attr("fill", "red")
+         .attr("opacity", 0.6);
+
+      // Helper to draw step line
+      function drawStepLine(data, color) {
+        let line = d3.line()
+            .x((d, i) => xScale(X[i][0]))
+            .y((d, i) => yScale(d))
+            .curve(d3.curveStepAfter);
+
+        svg.append("path")
+           .datum(data)
+           .attr("fill", "none")
+           .attr("stroke", color)
+           .attr("stroke-width", 2)
+           .attr("d", line);
+      }
+
+      // Plot residual predictors
+      drawStepLine(pred_resid1, "purple");     // First residual tree
+      drawStepLine(pred_resid2, "blue");       // Second residual tree
+      drawStepLine(corrected3, "green");       // Final corrected predictor
+    }
+
+    run();
+  </script>
 </head>
 <body>
-  <div class="container">
-    <h2>Points sampled from a quadratic curve with random noise.</h2>
-    <div class="button-row">
-      <button onclick="regenerateData()">Regenerate Data</button>
-    </div>
-    <div class="plots-grid" id="plots-grid"></div>
-  </div>
-
-  <script>
-    function generateNoisyQuadraticData(n=100, a=0.5, b=0, c=2, noise=2.0) {
-      const x = Array.from({length: n}, (_, i) => -5 + 10 * i / (n-1));
-      const yTrue = x.map(xi => a*xi*xi + b*xi + c);
-      const yNoisy = yTrue.map(yi => yi + (Math.random() - 0.5) * noise * 2);
-      return { x, yTrue, yNoisy };
-    }
-
-    function piecewiseConstantFit(x, y, bins=5) {
-      const minX = Math.min(...x), maxX = Math.max(...x);
-      const binWidth = (maxX - minX) / bins;
-      let binEdges = Array.from({length: bins+1}, (_, i) => minX + i*binWidth);
-      let binMeans = [];
-
-      for (let i = 0; i < bins; i++) {
-        let binYs = y.filter((_, j) => x[j] >= binEdges[i] && x[j] < binEdges[i+1]);
-        binMeans.push(binYs.length ? binYs.reduce((a,b)=>a+b,0)/binYs.length : 0);
-      }
-
-      let stepX = [], stepY = [];
-      for (let i = 0; i < bins; i++) {
-        stepX.push(binEdges[i]);
-        stepY.push(binMeans[i]);
-        stepX.push(binEdges[i+1]);
-        stepY.push(binMeans[i]);
-      }
-      return { stepX, stepY, binEdges, binMeans };
-    }
-
-    function plotAll() {
-      const grid = document.getElementById('plots-grid');
-      grid.innerHTML = '';
-      const nRows = 3;
-
-      for (let row = 0; row < nRows; row++) {
-        const {x, yTrue, yNoisy} = generateNoisyQuadraticData();
-        const fit = piecewiseConstantFit(x, yNoisy, 5);
-
-        // Predictions for each x
-        const preds = x.map(xi => {
-          let bin = Math.min(Math.floor(5*(xi+5)/10), fit.binMeans.length-1);
-          return fit.binMeans[bin];
-        });
-
-        // --- Left plot: data + true + prediction ---
-        const leftDiv = document.createElement('div');
-        leftDiv.className = 'plot';
-        leftDiv.id = `plot-left-${row}`;
-        grid.appendChild(leftDiv);
-
-        Plotly.newPlot(leftDiv.id, [
-          {x, y: yNoisy, mode: 'markers', name: 'Noisy Data', marker: {color: 'crimson', size: 5}},
-          {x, y: yTrue, mode: 'lines', name: 'True Quadratic', line: {color: 'seagreen', width: 2}},
-          {x: fit.stepX, y: fit.stepY, mode: 'lines', name: 'Tree Prediction', 
-           line: {color: 'purple', width: 2, shape: 'hv'}}
-        ], {
-          margin: {t: 20, r: 10, l: 30, b: 30},
-          height: 250,
-          showlegend: true,
-          yaxis: {range: [-2.5, 14]},
-          xaxis: {range: [-5, 5]}
-        }, {displayModeBar: false});
-
-        // --- Right plot: residuals ---
-        const residuals = yNoisy.map((yi, i) => yi - preds[i]);
-        const rightDiv = document.createElement('div');
-        rightDiv.className = 'plot';
-        rightDiv.id = `plot-right-${row}`;
-        grid.appendChild(rightDiv);
-
-        Plotly.newPlot(rightDiv.id, [
-          {x, y: residuals, mode: 'markers', name: 'Residuals', marker: {color: 'crimson', size: 5}},
-          {x: x, y: Array(x.length).fill(0), mode: 'lines', line: {color: 'gray', width: 1, dash: 'dot'}, showlegend: false}
-        ], {
-          margin: {t: 20, r: 10, l: 30, b: 30},
-          showlegend: false,
-          height: 180,
-          yaxis: {range: [-6, 6]},
-          xaxis: {range: [-5, 5]}
-        }, {displayModeBar: false});
-      }
-    }
-
-    function regenerateData() {
-      plotAll();
-    }
-
-    window.onload = plotAll;
-  </script>
+  <h2>Residual Tree Predictions</h2>
 </body>
 </html>
